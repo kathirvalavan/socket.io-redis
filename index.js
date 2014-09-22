@@ -47,6 +47,7 @@ function adapter(uri, opts){
   var sub = opts.subClient;
   var data = opts.dataClient;
   var prefix = opts.key || 'socket.io';
+  var node = opts.node || false; // Each instance is given a different name to track the ids written by that instance
 
   // init clients if needed
   if (!pub) pub = socket ? redis(socket) : redis(port, host);
@@ -76,6 +77,11 @@ function adapter(uri, opts){
       if (err) self.emit('error', err);
     });
     sub.on('pmessage', this.onmessage.bind(this));
+    this.cleanup(function(err){
+      if (err) { debug(err) };
+      debug('Cleaned up stale data from Redis, if any')
+    });
+    this.setupExitHandler('SIGTERM', 'SIGINT', 'SIGQUIT');
   }
 
   /**
@@ -114,10 +120,13 @@ function adapter(uri, opts){
 
   Redis.prototype.add = function(id, room, fn){
     Adapter.prototype.add.call(this, id, room);
-    data.multi()
-      .sadd(prefix + '#' + room, id)
-      .sadd(prefix + '#' + id, room)
-      .exec(function(){
+    var multi = data.multi();
+    multi.sadd(prefix + '#' + room, id)
+      .sadd(prefix + '#' + id, room);
+
+    if (node) data.sadd(prefix + '#' + node, id); // Add to IDs written in redis by this instance
+
+    multi.exec(function(){
         if (fn) process.nextTick(fn.bind(null, null));
       });
 
@@ -134,10 +143,13 @@ function adapter(uri, opts){
 
   Redis.prototype.del = function(id, room, fn){
     Adapter.prototype.del.call(this, id, room);
-    data.multi()
-      .srem(prefix + '#' + room, id)
-      .srem(prefix + '#' + id, room)
-      .exec(function(){
+    var multi = data.multi();
+    multi.srem(prefix + '#' + room, id)
+      .srem(prefix + '#' + id, room);
+
+    if (node) multi.srem(prefix + '#' + node, id);
+
+    multi.exec(function(){
         if (fn) process.nextTick(fn.bind(null, null));
       });
   };
@@ -153,12 +165,14 @@ function adapter(uri, opts){
   Redis.prototype.delAll = function(id, fn){
     Adapter.prototype.delAll.call(this, id);
 
-    data.smembers(prefix + '#' +  id, function(err, rooms){
+    this.clients(id, function(err, rooms){
+      if (err) { debug(err) };
       var multi = data.multi();
       for(var i=0; i<rooms.length; ++i){
         multi.srem(prefix + '#' + rooms[i], id);
       }
       multi.del(prefix + '#' + id);
+      if (node) multi.srem(prefix + '#' + node, id);
       multi.exec(fn);
     });
   };
@@ -188,34 +202,72 @@ function adapter(uri, opts){
     if (!remote) pub.publish(key, msgpack.encode([packet, opts]));
   };
 
-
-  // Set up exit handlers so we can clean up this process's redis data before exiting
-
-  process.stdin.resume(); //so the program will not close instantly
-  function exitHandler(options, err){
-    var i;
-    var multi = data.multi();
-    var execDone = false;
-
-    var roomIds = Object.keys(self.rooms);
-    var socketIds = Object.keys(self.sids);
-    for(i=0; i<roomIds.length; ++i){
-      multi.srem(prefix + '#' + roomIds[i], Object.keys(self.rooms[roomIds[i]]));
-    }
-    for(i=0; i<socketIds.length; ++i){
-      multi.srem(prefix + '#' + socketIds[i], Object.keys(self.sids[socketIds[i]]));
-    }
-    multi.exec(function(err, replies){
-      process.exit();
+  /**
+   * Cleans up stale socket IDs from previous runs, when the instance was abruptly stopped
+   * Requires the option `node` to be set
+   * @param {function} callback
+   * @api private
+   */
+  Redis.prototype.cleanup =  function(fn) {
+    var self = this;
+    var ns = node || prefix; // If multi instance, deletes only stale ids from that instance. Else removes everything
+    this.clients(ns, function(err, sockIDs) {
+      var staleIDs = sockIDs;
+      var errors;
+      if (staleIDs.length == 0) { return };
+      function _delStaleSockID (id) {
+        if (id) {
+          debug('Removing stale socket id ' + id);
+          self.delAll(id, function(err, results) {
+            if (err) {
+              debug(err);
+              if (!errors) { errors = [] };
+              errors.push(err);
+            }
+            return _delStaleSockID(staleIDs.shift());
+          });
+        } else {
+          return fn(errors);
+        }
+      }
+      return _delStaleSockID(staleIDs.shift());
     });
   }
- 
-  // //do something when app is closing
-  // process.on('exit', exitHandler.bind(null,{cleanup:true}));
-  process.on('SIGTERM', exitHandler);
-  process.on('SIGINT', exitHandler);
-  process.on('SIGQUIT', exitHandler);
-  process.on('uncaughtException', exitHandler);
+
+  /**
+   * Set up exit handlers so we can clean up this process's redis data before exiting
+   * @param {Array} events
+   * @api private
+   */
+  Redis.prototype.setupExitHandler = function() {
+    var self = this;
+    process.stdin.resume(); //so the program will not close instantly
+    // Copy `arguments` variable to an Array
+    var events = Array.prototype.slice.call(arguments, 0);
+    for (var ev = events.length - 1; ev >= 0; ev--) {
+      // For every event that causes the process to exit, make the cleanup
+      process.on(events[ev], function() {
+        debug('Please wait while data stored in redis is cleaned up');
+        var i;
+        var multi = data.multi();
+        var execDone = false;
+
+        var roomIds = Object.keys(self.rooms);
+        var socketIds = Object.keys(self.sids);
+        for(i=0; i<roomIds.length; ++i){
+          multi.srem(prefix + '#' + roomIds[i], Object.keys(self.rooms[roomIds[i]]));
+        }
+        for(i=0; i<socketIds.length; ++i){
+          multi.srem(prefix + '#' + socketIds[i], Object.keys(self.sids[socketIds[i]]));
+          if (node) multi.srem(prefix + '#' + node, Object.keys(self.sids[socketIds[i]]));
+        }
+        multi.exec(function(err, replies){
+          debug('Redis cleanup successful');
+          process.exit();
+        });
+      });
+    };
+  };
  
 
   return Redis;
