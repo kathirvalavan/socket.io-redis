@@ -101,11 +101,16 @@ function adapter(uri, opts){
     if (uid == pieces.pop()) return debug('ignore same uid');
     var args = msgpack.decode(msg);
 
-    if (args[0] && args[0].nsp === undefined)
+    if (args[0] && args[0].nsp === undefined) {
       args[0].nsp = '/';
+    }
 
-    if (!args[0] || args[0].nsp != this.nsp.name) return debug('ignore different namespace');
+    if (!args[0] || args[0].nsp != this.nsp.name) {
+      return debug('ignore different namespace');
+    }
+    
     args.push(true);
+
     this.broadcast.apply(this, args);
   };
 
