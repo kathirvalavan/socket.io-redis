@@ -1,6 +1,6 @@
 {
   "name": "socket.io-redis",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "",
   "repository": {
     "type": "git",
@@ -14,7 +14,7 @@
     "uid2": "0.0.3",
     "redis": "0.10.1",
     "msgpack-js": "0.3.0",
-    "socket.io-adapter": "shrikrishnaholla/socket.io-adapter"
+    "socket.io-adapter": "git://github.com/shrikrishnaholla/socket.io-adapter#staging"
   },
   "devDependencies": {
     "socket.io": "shrikrishnaholla/socket.io",
