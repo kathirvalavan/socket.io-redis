@@ -4,7 +4,7 @@
   "description": "",
   "repository": {
     "type": "git",
-    "url": "git@github.com:shrikrishnaholla/socket.io-redis.git"
+    "url": "git@github.com:sathappan/socket.io-redis.git"
   },
   "scripts": {
     "test": "mocha"
@@ -14,10 +14,10 @@
     "uid2": "0.0.3",
     "redis": "0.10.1",
     "msgpack-js": "0.3.0",
-    "socket.io-adapter": "git://github.com/shrikrishnaholla/socket.io-adapter"
+    "socket.io-adapter": "git://github.com/sathappan/socket.io-adapter"
   },
   "devDependencies": {
-    "socket.io": "shrikrishnaholla/socket.io",
+    "socket.io": "sathappan/socket.io",
     "socket.io-client": "Automattic/socket.io-client",
     "mocha": "1.18.0",
     "expect.js": "0.3.1",
